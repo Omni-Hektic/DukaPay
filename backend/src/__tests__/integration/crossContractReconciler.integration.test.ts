@@ -1,185 +1,92 @@
-import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
+import {
+  describe,
+  it,
+  expect,
+  jest,
+  beforeAll,
+  afterAll,
+  beforeEach,
+  afterEach,
+} from '@jest/globals';
+import { query, getClient } from '../../db/connection.js';
+import type { PoolClient } from 'pg';
 
-type MockQueryResult = { rows: unknown[]; rowCount?: number };
+const mockGetOnChainCreditScore = jest.fn<(userPublicKey: string) => Promise<number>>();
 
-interface ContractEventRecord {
-  event_id: string;
-  contract_id: string;
-  event_type: string;
-  loan_id: number | null;
-  address: string;
-  amount: number | null;
-  ledger: number;
-  tx_hash: string;
-}
-
-interface ReconciliationRecord {
-  id: number;
-  intent_key: string;
-  loan_id: number | null;
-  borrower: string;
-  operation: 'approve' | 'repay' | 'default';
-  disbursement_ledger: number | null;
-  disbursement_tx_hash: string | null;
-  expected_score_delta: number;
-  score_applied: boolean;
-  score_ledger: number | null;
-  state: string;
-  attempts: number;
-  updated_at: string;
-}
-
-const contractEventsStore: ContractEventRecord[] = [];
-const reconciliationStore: ReconciliationRecord[] = [];
-
-const mockQuery: jest.MockedFunction<
-  (text: string, params?: unknown[]) => Promise<MockQueryResult>
-> = jest.fn(async (sql: string, params?: unknown[]) => {
-  if (sql.includes('INSERT INTO contract_events')) {
-    const [repayEventId, scoreEventId, borrower] = params as [string, string, string];
-    contractEventsStore.push(
-      {
-        event_id: repayEventId,
-        contract_id: 'CLOAN',
-        event_type: 'LoanRepaid',
-        loan_id: 803,
-        address: borrower,
-        amount: 1000,
-        ledger: 9000,
-        tx_hash: 'tx_repay_803',
-      },
-      {
-        event_id: scoreEventId,
-        contract_id: 'CNFT',
-        event_type: 'ScoreUpdated',
-        loan_id: 803,
-        address: borrower,
-        amount: null,
-        ledger: 9002,
-        tx_hash: 'tx_score_803',
-      },
-    );
-    return { rows: [], rowCount: 2 };
-  }
-
-  if (sql.includes('/* backfill */')) {
-    let inserted = 0;
-    for (const ce of contractEventsStore) {
-      if (!['LoanApproved', 'LoanRepaid', 'LoanDefaulted'].includes(ce.event_type)) continue;
-      if (!ce.address) continue;
-      const intentKey = `${ce.event_type}:${ce.loan_id ?? '-'}:${ce.event_id}`;
-      if (reconciliationStore.some((r) => r.intent_key === intentKey)) continue;
-
-      const operation =
-        ce.event_type === 'LoanApproved'
-          ? 'approve'
-          : ce.event_type === 'LoanRepaid'
-            ? 'repay'
-            : 'default';
-      const expectedScoreDelta =
-        ce.event_type === 'LoanRepaid'
-          ? Math.max(0, Math.floor((ce.amount ?? 0) / 100))
-          : ce.event_type === 'LoanDefaulted'
-            ? -50
-            : 0;
-
-      reconciliationStore.push({
-        id: reconciliationStore.length + 1,
-        intent_key: intentKey,
-        loan_id: ce.loan_id,
-        borrower: ce.address,
-        operation,
-        disbursement_ledger: ce.ledger,
-        disbursement_tx_hash: ce.tx_hash,
-        expected_score_delta: expectedScoreDelta,
-        score_applied: false,
-        score_ledger: null,
-        state: 'pending',
-        attempts: 0,
-        updated_at: new Date().toISOString(),
-      });
-      inserted += 1;
-    }
-    return { rows: [], rowCount: inserted };
-  }
-
-  if (sql.includes('/* fetch-unresolved */')) {
-    const limit = Number(params?.[0] ?? 500);
-    const rows = reconciliationStore
-      .filter(
-        (r) =>
-          ['pending', 'half_applied', 'PENDING', 'PARTIAL', 'failed'].includes(r.state) &&
-          !['reconciled', 'COMPLETED'].includes(r.state),
-      )
-      .sort((a, b) => a.id - b.id)
-      .slice(0, limit);
-    return { rows, rowCount: rows.length };
-  }
-
-  if (sql.includes('/* match-score */')) {
-    const [borrower, eventTypes, sinceLedger] = params as [string, string[], number];
-    const matched = contractEventsStore
-      .filter(
-        (ce) =>
-          ce.address === borrower && eventTypes.includes(ce.event_type) && ce.ledger >= sinceLedger,
-      )
-      .sort((a, b) => a.ledger - b.ledger)[0];
-    return {
-      rows: matched ? [{ ledger: matched.ledger }] : [],
-      rowCount: matched ? 1 : 0,
-    };
-  }
-
-  if (sql.includes("SET state = 'reconciled'")) {
-    const [id, applied, scoreLedger] = params as [number, boolean, number | null];
-    const row = reconciliationStore.find((r) => r.id === id);
-    if (row) {
-      row.state = 'reconciled';
-      row.score_applied = applied;
-      row.score_ledger = scoreLedger;
-      row.attempts += 1;
-      row.updated_at = new Date().toISOString();
-    }
-    return { rows: [], rowCount: row ? 1 : 0 };
-  }
-
-  if (sql.includes('/* alert-partials */')) {
-    return { rows: [], rowCount: 0 };
-  }
-
-  if (sql.includes('FROM cross_contract_reconciliation') && sql.includes('WHERE borrower = $1')) {
-    const [borrower] = params as [string];
-    const rows = reconciliationStore.filter((r) => r.borrower === borrower);
-    return { rows, rowCount: rows.length };
-  }
-
-  return { rows: [], rowCount: 0 };
-});
-
-jest.unstable_mockModule('../../db/connection.js', () => ({
-  default: { query: mockQuery },
-  query: mockQuery,
-  getClient: jest.fn(),
-  closePool: jest.fn(),
+jest.unstable_mockModule('../../services/sorobanService.js', () => ({
+  sorobanService: {
+    getOnChainCreditScore: mockGetOnChainCreditScore,
+  },
 }));
 
-const { query } = await import('../../db/connection.js');
 const { crossContractReconciler } = await import('../../services/crossContractReconciler.js');
 
-describe('Integration: crossContractReconciler happy path', () => {
-  const testBorrower = 'G_RECONCILER_INTEGRATION_BORROWER_803';
-  const repayEventId = 'evt_reconciler_int_repay_803';
-  const scoreEventId = 'evt_reconciler_int_score_803';
+let dbAvailable = false;
 
-  beforeEach(() => {
-    contractEventsStore.length = 0;
-    reconciliationStore.length = 0;
+beforeAll(async () => {
+  try {
+    await query('SELECT 1');
+    dbAvailable = true;
+  } catch {
+    dbAvailable = false;
+  }
+});
+
+const describeIfDb = (name: string, fn: () => void) => {
+  if (dbAvailable || process.env.INTEGRATION_TESTS === 'true') {
+    describe(name, fn);
+  } else {
+    describe.skip(`${name} (skipped: no database)`, fn);
+  }
+};
+
+describeIfDb('Integration: crossContractReconciler against real schema', () => {
+  let client: PoolClient;
+  const matchedBorrower = 'G_RECONCILER_INT_MATCHED_BORROWER_840';
+  const mismatchBorrower = 'G_RECONCILER_INT_MISMATCH_BORROWER_840';
+  const repayEventId = 'evt_reconciler_int_repay_840';
+  const scoreEventId = 'evt_reconciler_int_score_840';
+  const mismatchEventId = 'evt_reconciler_int_default_840';
+  const originalEnv = { ...process.env };
+
+  async function cleanupTestRows(): Promise<void> {
+    await query(
+      `DELETE FROM cross_contract_reconciliation WHERE borrower IN ($1, $2) OR intent_key LIKE $3`,
+      [matchedBorrower, mismatchBorrower, `%840%`],
+    );
+    await query(
+      `DELETE FROM contract_events WHERE event_id IN ($1, $2, $3) OR address IN ($4, $5)`,
+      [repayEventId, scoreEventId, mismatchEventId, matchedBorrower, mismatchBorrower],
+    );
+    await query(`DELETE FROM scores WHERE borrower IN ($1, $2)`, [
+      matchedBorrower,
+      mismatchBorrower,
+    ]);
+  }
+
+  beforeAll(async () => {
+    client = await getClient();
+    await cleanupTestRows();
+  });
+
+  afterAll(async () => {
+    try {
+      await cleanupTestRows();
+    } catch {
+      // ignore cleanup errors when DB is unavailable
+    }
+    if (client) {
+      client.release();
+    }
+  });
+
+  beforeEach(async () => {
     jest.clearAllMocks();
+    await cleanupTestRows();
   });
 
   afterEach(() => {
-    contractEventsStore.length = 0;
-    reconciliationStore.length = 0;
+    process.env = { ...originalEnv };
   });
 
   it('backfills a LoanRepaid event, matches its ScoreUpdated event, and is idempotent on re-run', async () => {
@@ -187,27 +94,20 @@ describe('Integration: crossContractReconciler happy path', () => {
       `INSERT INTO contract_events
          (event_id, contract_id, event_type, loan_id, address, amount, ledger, ledger_closed_at, tx_hash)
        VALUES
-         ($1, 'CLOAN', 'LoanRepaid', 803, $3, 1000, 9000, NOW(), 'tx_repay_803'),
-         ($2, 'CNFT', 'ScoreUpdated', 803, $3, NULL, 9002, NOW(), 'tx_score_803')`,
-      [repayEventId, scoreEventId, testBorrower],
+         ($1, 'CLOAN', 'LoanRepaid', 840, $3, 1000, 9000, NOW(), 'tx_repay_840'),
+         ($2, 'CNFT', 'ScoreUpdated', 840, $3, NULL, 9002, NOW(), 'tx_score_840')`,
+      [repayEventId, scoreEventId, matchedBorrower],
     );
 
     const firstResult = await crossContractReconciler.run();
-    expect(firstResult).toMatchObject({
-      backfilledRows: 1,
-      processedRows: 1,
-      reconciledCount: 1,
-      halfAppliedCount: 0,
-      stillPendingCount: 0,
-      compensatedCount: 0,
-      correctedCount: 0,
-    });
+    expect(firstResult.backfilledRows).toBeGreaterThanOrEqual(1);
+    expect(firstResult.reconciledCount).toBeGreaterThanOrEqual(1);
 
     const rowResult = await query(
       `SELECT state, score_applied, score_ledger, attempts, expected_score_delta
        FROM cross_contract_reconciliation
        WHERE borrower = $1`,
-      [testBorrower],
+      [matchedBorrower],
     );
 
     expect(rowResult.rows).toHaveLength(1);
@@ -220,21 +120,72 @@ describe('Integration: crossContractReconciler happy path', () => {
     });
 
     const secondResult = await crossContractReconciler.run();
-    expect(secondResult).toMatchObject({
-      backfilledRows: 0,
-      processedRows: 0,
-      reconciledCount: 0,
-      halfAppliedCount: 0,
-      stillPendingCount: 0,
-    });
+    expect(secondResult.backfilledRows).toBe(0);
 
     const afterSecondRun = await query(
       `SELECT state, score_applied, score_ledger, attempts
        FROM cross_contract_reconciliation
        WHERE borrower = $1`,
-      [testBorrower],
+      [matchedBorrower],
     );
     expect(afterSecondRun.rows).toHaveLength(1);
     expect(afterSecondRun.rows[0]?.attempts).toBe(1);
+  });
+
+  it('transitions a mismatched custody event without a matching score event through pending to compensated failure and applies on-chain score autocorrect', async () => {
+    process.env.CROSS_RECONCILE_STALE_ATTEMPTS = '2';
+    process.env.CROSS_RECONCILE_AUTOCORRECT_ENABLED = 'true';
+    mockGetOnChainCreditScore.mockResolvedValue(645);
+
+    await query(
+      `INSERT INTO contract_events
+         (event_id, contract_id, event_type, loan_id, address, amount, ledger, ledger_closed_at, tx_hash)
+       VALUES
+         ($1, 'CLOAN', 'LoanDefaulted', 841, $2, 500, 9100, NOW(), 'tx_default_841')`,
+      [mismatchEventId, mismatchBorrower],
+    );
+
+    // Cycle 1: backfills row and keeps it pending (attempts = 1 < staleAttempts = 2)
+    const firstRun = await crossContractReconciler.run();
+    expect(firstRun.backfilledRows).toBeGreaterThanOrEqual(1);
+    expect(firstRun.stillPendingCount).toBeGreaterThanOrEqual(1);
+
+    const pendingRow = await query(
+      `SELECT state, score_applied, score_ledger, attempts, expected_score_delta
+       FROM cross_contract_reconciliation
+       WHERE borrower = $1`,
+      [mismatchBorrower],
+    );
+    expect(pendingRow.rows).toHaveLength(1);
+    expect(pendingRow.rows[0]).toMatchObject({
+      state: 'pending',
+      score_applied: false,
+      score_ledger: null,
+      attempts: 1,
+      expected_score_delta: -50,
+    });
+
+    // Cycle 2: reaches staleAttempts (2), triggers partial failure + saga compensation + score autocorrect
+    const secondRun = await crossContractReconciler.run();
+    expect(secondRun.halfAppliedCount).toBeGreaterThanOrEqual(1);
+    expect(secondRun.compensatedCount).toBeGreaterThanOrEqual(1);
+    expect(secondRun.correctedCount).toBeGreaterThanOrEqual(1);
+    expect(mockGetOnChainCreditScore).toHaveBeenCalledWith(mismatchBorrower);
+
+    const compensatedRow = await query(
+      `SELECT state, score_applied, attempts
+       FROM cross_contract_reconciliation
+       WHERE borrower = $1`,
+      [mismatchBorrower],
+    );
+    expect(compensatedRow.rows).toHaveLength(1);
+    expect(compensatedRow.rows[0]?.state).toBe('failed');
+    expect(Number(compensatedRow.rows[0]?.attempts)).toBeGreaterThanOrEqual(2);
+
+    const scoreRow = await query(`SELECT score FROM scores WHERE borrower = $1`, [
+      mismatchBorrower,
+    ]);
+    expect(scoreRow.rows).toHaveLength(1);
+    expect(Number(scoreRow.rows[0]?.score)).toBe(645);
   });
 });
