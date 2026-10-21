@@ -93,7 +93,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable # not SHA-pinned: rolling channel branch (stable/beta/nightly track new Rust releases); pinning would freeze the toolchain version
+        uses: dtolnay/rust-toolchain@1.85.0 # pinned to match contracts/rust-toolchain.toml and indexer/rust-toolchain.toml
       - name: Cache dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -533,7 +533,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable # not SHA-pinned: rolling channel branch (stable/beta/nightly track new Rust releases); pinning would freeze the toolchain version
+        uses: dtolnay/rust-toolchain@1.85.0 # pinned to match contracts/rust-toolchain.toml and indexer/rust-toolchain.toml
       - name: Cache dependencies
         # Pinned to a commit SHA, not the `v2` tag (see other pins in this
         # workflow for rationale).
@@ -634,7 +634,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable # not SHA-pinned: rolling channel branch (stable/beta/nightly track new Rust releases); pinning would freeze the toolchain version
+        uses: dtolnay/rust-toolchain@1.85.0 # pinned to match contracts/rust-toolchain.toml and indexer/rust-toolchain.toml
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2

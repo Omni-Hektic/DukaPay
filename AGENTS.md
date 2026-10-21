@@ -16,7 +16,7 @@ Major versions; exact pins live in `package.json` / `Cargo.toml`. Write code for
 - frontend: Next 16 (App Router), React 19, Tailwind 4 (CSS config), TanStack Query 5, zustand 5, ESLint 9 flat config
 - backend: Express 5, zod 4, pg 8, ESLint 8 (`.eslintrc`)
 - sdk: React 18, vitest 2, ESLint 10
-- contracts: soroban-sdk 22, Rust edition 2021
+- contracts & indexer: soroban-sdk 22, Rust 1.85.0 (pinned in `contracts/rust-toolchain.toml` and `indexer/rust-toolchain.toml`; do not use rolling `stable`)
 - Stellar JS: `@stellar/stellar-sdk` 14 everywhere
 
 ## Moved off (never import or copy)

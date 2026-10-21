@@ -52,7 +52,7 @@ jobs:
 
       - name: Install Rust toolchain
         if: matrix.language == 'rust'
-        uses: dtolnay/rust-toolchain@stable # not SHA-pinned: rolling channel branch (stable/beta/nightly track new Rust releases); pinning would freeze the toolchain version
+        uses: dtolnay/rust-toolchain@1.85.0 # pinned to match contracts/rust-toolchain.toml and indexer/rust-toolchain.toml
         with:
           targets: wasm32-unknown-unknown
 

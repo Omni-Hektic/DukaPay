@@ -96,7 +96,7 @@ DukaPay is a monorepo:
 | [`backend/`](backend) | API, auth, KYC adapter, event indexer, settlement services | Node 22, Express 5, TypeScript, Postgres |
 | [`frontend/`](frontend) | Web app for agents, borrowers, lenders and admins | Next.js 16, React 19, Tailwind 4 |
 | [`sdk/`](sdk) | `@dukapay/sdk`: typed API client, Freighter and Albedo wallet adapters, React hooks | TypeScript |
-| [`indexer/`](indexer) | Standalone Rust event indexer (experimental; the backend's TypeScript indexer is canonical) | Rust, Tokio |
+| [`indexer/`](indexer) | Standalone Rust event indexer (experimental; the backend's TypeScript indexer is canonical) | Rust 1.85, Tokio |
 | [`infra/`](infra), [`ops/`](ops), [`scripts/`](scripts) | Deployment, monitoring and tooling | Terraform, Docker |
 
 `money-policy.json` is the single source of the money rules (precision, rounding and allocation). The Rust and TypeScript money code is generated from it, and CI checks that both sides agree.
@@ -120,7 +120,7 @@ For the full design, see [ARCHITECTURE.md](ARCHITECTURE.md) and [CONTRACTS.md](C
 
 ## Quick start
 
-**You'll need:** Node 22 (see `.nvmrc`), Docker, and for contract work Rust via `rustup` (the toolchain is pinned in `contracts/rust-toolchain.toml`) plus the Stellar CLI.
+**You'll need:** Node 22 (see `.nvmrc`), Docker, and for Rust work (`contracts/` and `indexer/`) Rust `1.85.0` via `rustup` (pinned in `contracts/rust-toolchain.toml` and `indexer/rust-toolchain.toml`) plus the Stellar CLI.
 
 ### With Docker
 
